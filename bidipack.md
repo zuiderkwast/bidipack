@@ -44,7 +44,7 @@ are stored in big endian.
 | str0  | 1    | `11111100`                      | the empty string          |
 |       |      | `11111101`                      | unused                    |
 |       |      | `11111110`                      | unused                    |
-| end   | 1    | `11111111`                      | marks end of sequence     |
+| (end) | 1    | `11111111`                      | (reserved for end mark)   |
 
 ## Header
 
@@ -57,29 +57,38 @@ has the following parts:
 
 * Flags, a single byte with the bits `0000aass`, where
 
-    * `ss` is the number of bytes used for the total-size and num-elements
-      fields.
-    * `aa` is the allocation strategy with the values 0 = compact (only allocate
-      what's needed and shrink when deleting); 1 = normal (4 reallocations sizes
-      before the size is doubled); 2 = sparse (2 reallocations before the size
-      is doubled), 3 = extra sparse (each reallocation doubles the size).
+    * `ss` is log<sub>2</sub> of number of bytes used for the total-size and
+      num-elements fields, i.e. the `1 << ss` (1, 2, 4 or 8) bytes are used;
+    * `aa` is the allocation strategy with the values 0 = compact (only
+      allocate what's needed and shrink when deleting); 1 = normal (4
+      reallocations sizes before the size is doubled); 2 = sparse (2
+      reallocations before the size is doubled), 3 = extra sparse (each
+      reallocation doubles the size). See capacity below.
 
-* Capacity, a single byte representing size of the allocation. The value 0 means
-  that the capacity is equal to the total size. The values up to 4 have the
-  spacial meanings: `cap(1) = 8; cap(2) = 16; cap(3) = 32; cap(4) = 48`. For
-  values n > 4, the capacity is `cap(n) = cap2(n + 11)`, where `cap2(m) = (1 <<
-  (p + 2)) + (1 << p) * q`, where `p = (m & 0xfc) >> 2, q = m & 0x3` (i.e. q is
-  the two least significant bits of m and p are the other 6 bits of m). This
-  formula give four sizes before the capacity is doubled. The sizes are the same
-  as the size classes used by jemalloc and listed in [Table
-  1](http://jemalloc.net/jemalloc.3.html#size_classes) in jemalloc's manual.
-  When reallocation is needed, capacity is incremented by 1, 2 or 4 depeneding
-  on allocation strategy, and the formula gives the size in bytes. When deleting
-  elements, reallocation is only performed when the capacity can be reduced by 2
-  steps, and then it is only reduced by 1 step. This is to ensure that
-  reallocation isn't needed again if an element is added just after shrinking
-  the allocation. An exception is when an explicit shrinking operation is
-  performed.
+* Capacity, a single byte representing size of the allocation.
+
+  The allocation sizes are the size classes used by jemalloc and listed in
+  [Table 1](http://jemalloc.net/jemalloc.3.html#size_classes) in jemalloc's
+  manual. There are four sizes before the size is doubled. There is no point in
+  using sizes in between these, since the underlying allocator would not be able
+  to used that memory anyway.
+
+  The single 'capacity' byte encodes these sizes using a formula. The values 1-4
+  have the spacial meanings: `cap(1) = 8; cap(2) = 16; cap(3) = 32; cap(4) =
+  48`. For values n > 4, the capacity is `cap(n) = cap2(n + 11)`, where `cap2(m)
+  = (1 << (p + 2)) + (1 << p) * q`, where `p = (m & 0xfc) >> 2, q = m & 0x3`
+  (i.e. q is the two least significant bits of m and p are the other 6 bits of
+  m).
+
+  The value 0 can be used to disable this mechanism. Then the allocation size is
+  the same as the total size.
+
+  When reallocation is needed, capacity is incremented by 1, and the formula
+  gives the size in bytes. When deleting elements, reallocation is only
+  performed when the capacity can be reduced by 2 steps, and then it is only
+  reduced by 1 step. This is to ensure that reallocation isn't needed again if
+  an element is added just after shrinking the allocation. An exception is when
+  an explicit shrinking operation is performed.
 
 * Total size, including the header itself, as an 8bit, 16bit, 24bit or 32bit
   unsigned integer, as indicated by the `ss` bits in the flags field, in big
